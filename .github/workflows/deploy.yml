@@ -1,13 +1,9 @@
-# .github/workflows/deploy.yml (fixed)
-# Root causes of your error:
-# 1) Missing permissions block for OIDC (id-token: write)
-# 2) Ensure DEPLOY_ROLE_ARN (and SITE_BUCKET) repo secrets are set
-
 name: Deploy SkillSync v2
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 permissions:
   id-token: write
@@ -25,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Preflight: required secrets
+      - name: "Preflight: required secrets"
         run: |
           test -n "${{ secrets.DEPLOY_ROLE_ARN }}" || (echo "Missing DEPLOY_ROLE_ARN" && exit 1)
           echo "DEPLOY_ROLE_ARN present"
@@ -60,7 +56,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Preflight: required secrets
+      - name: "Preflight: required secrets"
         run: |
           test -n "${{ secrets.DEPLOY_ROLE_ARN }}" || (echo "Missing DEPLOY_ROLE_ARN" && exit 1)
           test -n "${{ secrets.SITE_BUCKET }}" || (echo "Missing SITE_BUCKET" && exit 1)
