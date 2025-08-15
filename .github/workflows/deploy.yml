@@ -1,44 +1,103 @@
-name: Deploy
+# .github/workflows/deploy.yml (fixed)
+# Root causes of your error:
+# 1) Missing permissions block for OIDC (id-token: write)
+# 2) Ensure DEPLOY_ROLE_ARN (and SITE_BUCKET) repo secrets are set
+
+name: Deploy SkillSync v2
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
+
+permissions:
+  id-token: write   # REQUIRED for GitHub OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  BACKEND_STACK: skillsync-backend
+  FRONTEND_STACK: skillsync-frontend
 
 jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up SAM CLI
+      - name: Preflight: check required secrets
+        run: |
+          test -n "${{ secrets.DEPLOY_ROLE_ARN }}" || (echo "Missing DEPLOY_ROLE_ARN" && exit 1)
+          echo "DEPLOY_ROLE_ARN present"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: WhoAmI
+        run: aws sts get-caller-identity
+
+      - name: Setup SAM CLI
         uses: aws-actions/setup-sam@v2
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
-
-      - name: Build and Deploy Backend
+      - name: Build & Deploy Backend
+        working-directory: backend
         run: |
           sam build --use-container
-          sam deploy --stack-name skillsync-backend --capabilities CAPABILITY_IAM
+          sam deploy \
+            --stack-name "${BACKEND_STACK}" \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides StageName=dev TableName=SkillSyncSkills AllowedOrigins='*' \
+            --region "${AWS_REGION}"
+
+      - name: Get API URL
+        id: api
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name "${BACKEND_STACK}" --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
+          echo "api_url=${API_URL}" >> $GITHUB_OUTPUT
 
   frontend:
-    runs-on: ubuntu-latest
     needs: backend
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Preflight: check required secrets
+        run: |
+          test -n "${{ secrets.DEPLOY_ROLE_ARN }}" || (echo "Missing DEPLOY_ROLE_ARN" && exit 1)
+          test -n "${{ secrets.SITE_BUCKET }}"   || (echo "Missing SITE_BUCKET" && exit 1)
+          echo "Secrets present"
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy Frontend
+      - name: Deploy or Update Frontend Infra
         run: |
-          aws s3 sync frontend/ s3://${{ secrets.SITE_BUCKET }} --delete
-          aws cloudfront create-invalidation --distribution-id ${{ secrets.DISTRIBUTION_ID }} --paths "/*"
+          aws cloudformation deploy \
+            --template-file infra/frontend.yaml \
+            --stack-name "${FRONTEND_STACK}" \
+            --parameter-overrides SiteBucketName="${{ secrets.SITE_BUCKET }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "${AWS_REGION}"
+
+      - name: Get Frontend Outputs
+        id: outs
+        run: |
+          BUCKET="${{ secrets.SITE_BUCKET }}"
+          DIST_ID=$(aws cloudformation describe-stacks --stack-name "${FRONTEND_STACK}" --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)
+          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "dist_id=${DIST_ID}" >> $GITHUB_OUTPUT
+
+      - name: Upload Frontend
+        run: |
+          aws s3 sync frontend/ "s3://${{ steps.outs.outputs.bucket }}" --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation --distribution-id "${{ steps.outs.outputs.dist_id }}" --paths "/*"
