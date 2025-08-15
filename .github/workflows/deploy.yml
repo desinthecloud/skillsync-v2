@@ -1,0 +1,48 @@
+name: Deploy SkillSync v2
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "backend/**", "infra/**", "frontend/**", ".github/workflows/**" ]
+permissions: { id-token: write, contents: read }
+env: { AWS_REGION: us-east-1, BACKEND_STACK: skillsync-backend, FRONTEND_STACK: skillsync-frontend }
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { aws-region: ${{ env.AWS_REGION }}, role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }} }
+      - uses: aws-actions/setup-sam@v2
+      - name: Build & Deploy Backend
+        working-directory: backend
+        run: |
+          sam build
+          sam deploy --stack-name "${BACKEND_STACK}" --resolve-s3 --capabilities CAPABILITY_IAM --parameter-overrides StageName=dev TableName=SkillSyncSkills AllowedOrigins='*' --region "${AWS_REGION}"
+      - name: Get API URL
+        id: api
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name "${BACKEND_STACK}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
+          echo "api_url=${API_URL}" >> $GITHUB_OUTPUT
+  frontend:
+    needs: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { aws-region: ${{ env.AWS_REGION }}, role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }} }
+      - name: Deploy or Update Frontend Infra
+        run: |
+          aws cloudformation deploy --template-file infra/frontend.yaml --stack-name "${FRONTEND_STACK}" --parameter-overrides SiteBucketName="${{ secrets.SITE_BUCKET }}" --capabilities CAPABILITY_NAMED_IAM --region "${AWS_REGION}"
+      - name: Get Frontend Outputs
+        id: outs
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks --stack-name "${FRONTEND_STACK}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
+          DIST_ID=$(aws cloudformation describe-stacks --stack-name "${FRONTEND_STACK}" --region "${AWS_REGION}" --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)
+          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "dist_id=${DIST_ID}" >> $GITHUB_OUTPUT
+      - name: Upload Frontend
+        run: |
+          aws s3 sync frontend/ "s3://${{ steps.outs.outputs.bucket }}" --delete
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation --distribution-id "${{ steps.outs.outputs.dist_id }}" --paths "/*"

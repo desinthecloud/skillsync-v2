@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SkillSync v2 - Backend (HTTP API + Lambda + DynamoDB)
+Parameters:
+  StageName: {Type: String, Default: dev}
+  TableName: {Type: String, Default: SkillSyncSkills}
+  AllowedOrigins: {Type: String, Default: "*"}
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref TableName
+        ALLOWED_ORIGINS: !Ref AllowedOrigins
+Resources:
+  SkillsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: { SSEEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: skillId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+        - { AttributeName: skillId, KeyType: RANGE }
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      CorsConfiguration:
+        AllowOrigins: [ !Ref AllowedOrigins ]
+        AllowHeaders: [ "*" ]
+        AllowMethods: [ GET, POST, PUT, DELETE, OPTIONS ]
+  SkillHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref SkillsTable }
+      Events:
+        Health:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /health, Method: GET } }
+        List:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /skills, Method: GET } }
+        Create:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /skills, Method: POST } }
+        Update:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /skills/{id}, Method: PUT } }
+        Delete:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /skills/{id}, Method: DELETE } }
+Outputs:
+  ApiEndpoint: { Description: Base URL, Value: !GetAtt HttpApi.ApiEndpoint }
+  TableNameOut: { Description: Table, Value: !Ref SkillsTable }

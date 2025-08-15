@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SkillSync v2 - IAM role for GitHub Actions OIDC (assume role)
+Parameters:
+  OidcProviderArn: { Type: String, Description: ARN of your GitHub OIDC provider }
+  RepoOwner: { Type: String, Description: GitHub org/user name }
+  RepoName: { Type: String, Description: GitHub repo name }
+  RoleName: { Type: String, Default: GitHubActionsDeployRole }
+  MaxSessionDuration: { Type: Number, Default: 3600 }
+Resources:
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      MaxSessionDuration: !Ref MaxSessionDuration
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref OidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals: { token.actions.githubusercontent.com:aud: sts.amazonaws.com }
+              StringLike: { token.actions.githubusercontent.com:sub: !Sub 'repo:${RepoOwner}/${RepoName}:ref:refs/heads/*' }
+      ManagedPolicyArns: [ arn:aws:iam::aws:policy/AdministratorAccess ]
+Outputs: { RoleArn: { Value: !GetAtt GitHubActionsRole.Arn, Description: ARN of the role to use in GitHub Actions } }

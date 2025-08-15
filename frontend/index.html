@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SkillSync v2</title>
+<link rel="stylesheet" href="./styles.css"/>
+<script defer src="./config.js"></script>
+<script defer src="./app.js"></script>
+</head><body><div class="container">
+<h1>SkillSync v2</h1>
+<section class="card"><h2>Add a Skill</h2>
+<form id="add-form">
+<label>User ID <input type="text" id="userId" required /></label>
+<label>Skill name <input type="text" id="skillName" required /></label>
+<label>Level <select id="skillLevel"><option value="">Select level</option><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></label>
+<label>Notes <textarea id="skillNotes"></textarea></label>
+<button type="submit">Add Skill</button>
+</form></section>
+<section class="card"><h2>Your Skills</h2>
+<div class="toolbar"><input type="text" id="listUserId" placeholder="Enter your User ID"/><button id="refresh">Refresh</button></div>
+<ul id="skills"></ul></section></div></body></html>
