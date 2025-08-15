@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+# SAM build artifacts
+backend/.aws-sam/
+.aws-sam/
+# macOS
+.DS_Store
+# Node (if you add later)
+node_modules/

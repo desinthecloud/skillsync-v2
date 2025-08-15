@@ -1,20 +1,37 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: SkillSync v2 - Frontend infrastructure (S3 + CloudFront with OAC)
-Parameters: { SiteBucketName: { Type: String, Description: Globally-unique S3 bucket name for the website content } }
+
+Parameters:
+  SiteBucketName:
+    Type: String
+    Description: Globally-unique S3 bucket name for the website content
+
 Resources:
   SiteBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref SiteBucketName
-      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
-      OwnershipControls: { Rules: [ { ObjectOwnership: BucketOwnerPreferred } ] }
-      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      VersioningConfiguration:
+        Status: Enabled
+
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
-      Name: !Sub 'oac-${SiteBucketName}'
-      Description: Access control for CloudFront to reach private S3 bucket
-      OriginAccessControlConfig: { Name: !Sub 'oac-${SiteBucketName}', OriginAccessControlOriginType: s3, SigningBehavior: always, SigningProtocol: sigv4 }
+      OriginAccessControlConfig:
+        Name: !Sub 'oac-${SiteBucketName}'
+        Description: Access control for CloudFront to reach private S3 bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -22,16 +39,27 @@ Resources:
         Enabled: true
         DefaultRootObject: index.html
         Origins:
-          - { Id: S3Origin, DomainName: !GetAtt SiteBucket.RegionalDomainName, S3OriginConfig: {}, OriginAccessControlId: !GetAtt OriginAccessControl.Id }
+          - Id: S3Origin
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
           ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: [ GET, HEAD, OPTIONS ]
-          CachedMethods: [ GET, HEAD, OPTIONS ]
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
           Compress: true
-          ForwardedValues: { QueryString: true }
+          ForwardedValues:
+            QueryString: true
         PriceClass: PriceClass_100
         HttpVersion: http2
+
   BucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -41,11 +69,25 @@ Resources:
         Statement:
           - Sid: AllowCloudFrontServicePrincipalReadOnly
             Effect: Allow
-            Principal: { Service: cloudfront.amazonaws.com }
-            Action: [ s3:GetObject, s3:ListBucket ]
-            Resource: [ !Sub '${SiteBucket.Arn}', !Sub '${SiteBucket.Arn}/*' ]
-            Condition: { StringEquals: { AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}' } }
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub '${SiteBucket.Arn}'
+              - !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
 Outputs:
-  BucketName: { Description: S3 bucket name for site, Value: !Ref SiteBucket }
-  DistributionId: { Description: CloudFront distribution ID, Value: !Ref Distribution }
-  DistributionDomainName: { Description: CloudFront domain, Value: !GetAtt Distribution.DomainName }
+  BucketName:
+    Description: S3 bucket name for site
+    Value: !Ref SiteBucket
+  DistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref Distribution
+  DistributionDomainName:
+    Description: CloudFront domain to access the site
+    Value: !GetAtt Distribution.DomainName
