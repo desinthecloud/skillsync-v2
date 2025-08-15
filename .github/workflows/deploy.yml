@@ -1,9 +1,9 @@
 name: Deploy SkillSync v2
 
+
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
 
 permissions:
   id-token: write
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Preflight: required secrets"
+      - name: Preflight: required secrets
         run: |
           test -n "${{ secrets.DEPLOY_ROLE_ARN }}" || (echo "Missing DEPLOY_ROLE_ARN" && exit 1)
           echo "DEPLOY_ROLE_ARN present"
@@ -49,14 +49,23 @@ jobs:
             --parameter-overrides StageName=dev TableName=SkillSyncSkills AllowedOrigins='*' \
             --region "${AWS_REGION}"
 
+          sam build --use-container
+          sam deploy \
+            --stack-name "${BACKEND_STACK}" \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides StageName=dev TableName=SkillSyncSkills AllowedOrigins='*' \
+            --region "${AWS_REGION}"
+
   frontend:
     runs-on: ubuntu-latest
+    needs: backend
     needs: backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Preflight: required secrets"
+      - name: Preflight: required secrets
         run: |
           test -n "${{ secrets.DEPLOY_ROLE_ARN }}" || (echo "Missing DEPLOY_ROLE_ARN" && exit 1)
           test -n "${{ secrets.SITE_BUCKET }}" || (echo "Missing SITE_BUCKET" && exit 1)
@@ -77,6 +86,13 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --region "${AWS_REGION}"
 
+          aws cloudformation deploy \
+            --template-file infra/frontend.yaml \
+            --stack-name "${FRONTEND_STACK}" \
+            --parameter-overrides SiteBucketName="${{ secrets.SITE_BUCKET }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "${AWS_REGION}"
+
       - name: Get Frontend Outputs
         id: outs
         run: |
@@ -87,9 +103,17 @@ jobs:
           echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
           echo "dist_id=${DIST_ID}" >> "$GITHUB_OUTPUT"
 
+          BUCKET="${{ secrets.SITE_BUCKET }}"
+          DIST_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${FRONTEND_STACK}" --region "${AWS_REGION}" \
+            --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)
+          echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "dist_id=${DIST_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Upload Frontend
         run: |
           aws s3 sync frontend/ "s3://${{ steps.outs.outputs.bucket }}" --delete
+
 
       - name: Invalidate CloudFront
         run: |
